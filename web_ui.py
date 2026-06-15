@@ -146,7 +146,8 @@ PAGE = """<!doctype html>
         border-radius:8px; padding:8px 8px; font-size:14px;}
   .unit{color:var(--muted); font-size:13px; margin-left:-6px;}
 
-  button#build{align-self:flex-end; display:flex; align-items:center; gap:8px;
+  .build-row{display:flex; justify-content:flex-end; margin-top:18px;}
+  button#build{display:flex; align-items:center; gap:8px;
         background:linear-gradient(180deg,var(--accent),#5b86ff); color:#0a1020; border:0;
         font-weight:700; padding:12px 20px; border-radius:11px; font-size:14px; cursor:pointer;
         box-shadow:0 6px 18px rgba(91,134,255,.35);}
@@ -212,9 +213,10 @@ PAGE = """<!doctype html>
 
       <div class="controls">
         <div class="ctrl-fields">
-          <div class="field" title="Real-world height of the TALLEST piece; everything else scales to match.">
+          <div class="field thick" title="Real-world height of the TALLEST piece; everything else scales to match.">
             <label for="height">Max Height</label>
-            <input id="height" type="number" min="1" step="0.5" value="15">
+            <input id="hrange" type="range" min="5" max="60" step="0.5" value="15">
+            <input id="height" type="number" min="5" step="0.5" value="15">
             <span class="unit">cm</span>
           </div>
           <div class="field thick">
@@ -223,13 +225,6 @@ PAGE = """<!doctype html>
             <input id="thickness" type="number" min="0.1" step="0.05" value="0.3">
             <span class="unit">cm</span>
           </div>
-          <button id="build" disabled>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
-              <path d="M3.3 7L12 12l8.7-5M12 22V12"/>
-            </svg>
-            Build &amp; open Blender
-          </button>
         </div>
 
         <div class="diagram" aria-hidden="true">
@@ -247,6 +242,16 @@ PAGE = """<!doctype html>
           </svg>
         </div>
       </div>
+
+      <div class="build-row">
+        <button id="build" disabled>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+            <path d="M3.3 7L12 12l8.7-5M12 22V12"/>
+          </svg>
+          Build &amp; open Blender
+        </button>
+      </div>
       <div id="prog" class="prog" hidden><span id="bar"></span></div>
       <div id="log" class="log"></div>
       <div id="status"></div>
@@ -257,6 +262,7 @@ PAGE = """<!doctype html>
   const drop=document.getElementById('drop'), picker=document.getElementById('picker'),
         list=document.getElementById('files'), buildBtn=document.getElementById('build'),
         statusEl=document.getElementById('status'), heightEl=document.getElementById('height'),
+        hrange=document.getElementById('hrange'),
         range=document.getElementById('trange'), num=document.getElementById('thickness'),
         prog=document.getElementById('prog'), bar=document.getElementById('bar'),
         logEl=document.getElementById('log');
@@ -352,7 +358,8 @@ PAGE = """<!doctype html>
 
   range.oninput=()=>{ num.value=range.value; updateDiagram(); };
   num.oninput=()=>{ const v=parseFloat(num.value); if(!isNaN(v)) range.value=Math.min(1,Math.max(0.1,v)); updateDiagram(); };
-  heightEl.oninput=updateDiagram;
+  hrange.oninput=()=>{ heightEl.value=hrange.value; updateDiagram(); };
+  heightEl.oninput=()=>{ const v=parseFloat(heightEl.value); if(!isNaN(v)) hrange.value=Math.min(60,Math.max(5,v)); updateDiagram(); };
   updateDiagram();
 
   async function writeBlendBack(){
