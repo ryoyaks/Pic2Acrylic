@@ -25,6 +25,7 @@ import sys
 import tempfile
 
 import bpy
+import bmesh
 import mathutils
 
 # ---- tunables in CENTIMETRES (env vars let the web UI / .bat override) ----
@@ -360,6 +361,19 @@ def build(manifest_path):
     for o in all_objs:
         o.rotation_euler = (math.pi / 2.0, 0.0, 0.0)
     apply_transform(all_objs, rotation=True)
+
+    # Force every print plane's normal to face the front (-Y). The SVG fill winding
+    # isn't guaranteed, and the double-sided front/back choice keys off geometry
+    # backfacing -- a flipped normal would swap front and back art for that piece.
+    for _, prt in piece_objs:
+        me = prt.data
+        if me.polygons and me.polygons[0].normal.y > 0.0:
+            bm = bmesh.new()
+            bm.from_mesh(me)
+            bmesh.ops.reverse_faces(bm, faces=bm.faces)
+            bm.to_mesh(me)
+            bm.free()
+            me.update()
 
     # Drop onto the floor (min Z -> 0) and centre in X, same shift for every object.
     bpy.context.view_layer.update()
