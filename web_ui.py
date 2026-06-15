@@ -14,7 +14,8 @@ import shutil
 import subprocess
 import sys
 
-from flask import Flask, request, render_template_string, send_from_directory, jsonify
+from flask import (Flask, request, render_template_string, send_from_directory,
+                   jsonify, Response, stream_with_context)
 
 HERE = pathlib.Path(__file__).resolve().parent
 WORK = HERE / "_web_work"          # uploads + prep output live here (gitignored)
@@ -134,11 +135,12 @@ PAGE = """<!doctype html>
   .tag{font-size:10px; padding:1px 7px; border-radius:999px; border:1px solid var(--line); color:var(--muted);}
   .tag.mask{color:var(--accent2); border-color:rgba(157,123,255,.4);}
 
-  .controls{display:flex; align-items:center; gap:14px; margin-top:20px; flex-wrap:wrap;}
-  .thick{display:flex; align-items:center; gap:12px; flex:1; min-width:220px;}
-  .thick label{font-size:13px; color:#c3cad8; white-space:nowrap;}
-  input[type=range]{flex:1; accent-color:var(--accent);}
-  input[type=number]{width:74px; background:#0e1117; border:1px solid #333b48; color:var(--ink);
+  .controls{display:flex; align-items:center; gap:16px; margin-top:20px; flex-wrap:wrap;}
+  .field{display:flex; align-items:center; gap:10px;}
+  .field label{font-size:13px; color:#c3cad8; white-space:nowrap;}
+  .thick{flex:1; min-width:210px;}
+  input[type=range]{flex:1; accent-color:var(--accent); min-width:80px;}
+  input[type=number]{width:68px; background:#0e1117; border:1px solid #333b48; color:var(--ink);
         border-radius:8px; padding:8px 8px; font-size:14px;}
   .unit{color:var(--muted); font-size:13px; margin-left:-6px;}
 
@@ -148,7 +150,16 @@ PAGE = """<!doctype html>
         box-shadow:0 6px 18px rgba(91,134,255,.35);}
   button#build:disabled{opacity:.45; cursor:default; box-shadow:none;}
 
-  #status{margin-top:16px; font-size:13px; white-space:pre-wrap; border-radius:10px;}
+  .prog{height:8px; background:#0e1117; border:1px solid var(--line); border-radius:6px;
+        overflow:hidden; margin-top:18px;}
+  .prog span{display:block; height:100%; width:0; transition:width .3s;
+        background:linear-gradient(90deg,var(--accent),var(--accent2));}
+  .log{margin-top:10px; font-size:12px; font-family:ui-monospace,Consolas,monospace;
+        color:var(--muted); max-height:120px; overflow:auto;}
+  .log div{padding:1px 2px;}
+  .log div.err{color:var(--err);}
+
+  #status{margin-top:14px; font-size:13px; white-space:pre-wrap; border-radius:10px;}
   #status.show{padding:12px 14px; background:#0e1117; border:1px solid var(--line);}
   #status.ok{color:var(--ok); border-color:rgba(126,226,168,.35);}
   #status.err{color:var(--err); border-color:rgba(255,139,139,.35);}
@@ -198,11 +209,16 @@ PAGE = """<!doctype html>
       <ul id="files"></ul>
 
       <div class="controls">
-        <div class="thick">
+        <div class="field" title="Real-world height of the TALLEST piece; everything else scales to match.">
+          <label for="height">Height</label>
+          <input id="height" type="number" min="1" step="0.5" value="15">
+          <span class="unit">cm</span>
+        </div>
+        <div class="field thick">
           <label for="thickness">Thickness</label>
-          <input id="trange" type="range" min="1" max="10" step="0.5" value="3">
-          <input id="thickness" type="number" min="0.5" step="0.5" value="3.0">
-          <span class="unit">mm</span>
+          <input id="trange" type="range" min="0.1" max="1" step="0.05" value="0.3">
+          <input id="thickness" type="number" min="0.1" step="0.05" value="0.3">
+          <span class="unit">cm</span>
         </div>
         <button id="build" disabled>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -212,6 +228,8 @@ PAGE = """<!doctype html>
           Build &amp; open Blender
         </button>
       </div>
+      <div id="prog" class="prog" hidden><span id="bar"></span></div>
+      <div id="log" class="log"></div>
       <div id="status"></div>
     </div>
   </div>
@@ -219,11 +237,16 @@ PAGE = """<!doctype html>
 <script>
   const drop=document.getElementById('drop'), picker=document.getElementById('picker'),
         list=document.getElementById('files'), buildBtn=document.getElementById('build'),
-        statusEl=document.getElementById('status'),
-        range=document.getElementById('trange'), num=document.getElementById('thickness');
+        statusEl=document.getElementById('status'), heightEl=document.getElementById('height'),
+        range=document.getElementById('trange'), num=document.getElementById('thickness'),
+        prog=document.getElementById('prog'), bar=document.getElementById('bar'),
+        logEl=document.getElementById('log');
   let chosen=[], dirHandle=null;
 
   function setStatus(m,c){ statusEl.textContent=m; statusEl.className=(m?'show ':'')+(c||''); }
+  function setProg(pct){ prog.hidden=false; bar.style.width=Math.max(0,Math.min(100,pct))+'%'; }
+  function logLine(m,cls){ const d=document.createElement('div'); if(cls)d.className=cls;
+    d.textContent=m; logEl.appendChild(d); logEl.scrollTop=logEl.scrollHeight; }
 
   function render(){
     list.innerHTML='';
@@ -283,31 +306,49 @@ PAGE = """<!doctype html>
   });
 
   range.oninput=()=>{ num.value=range.value; };
-  num.oninput=()=>{ const v=parseFloat(num.value); if(!isNaN(v)) range.value=Math.min(10,Math.max(1,v)); };
+  num.oninput=()=>{ const v=parseFloat(num.value); if(!isNaN(v)) range.value=Math.min(1,Math.max(0.1,v)); };
+
+  async function writeBlendBack(){
+    const buf=await (await fetch('/result.blend')).arrayBuffer();
+    const prep=await dirHandle.getDirectoryHandle('_prep',{create:true});
+    const fh=await prep.getFileHandle('acrylic.blend',{create:true});
+    const w=await fh.createWritable(); await w.write(buf); await w.close();
+  }
 
   buildBtn.onclick=async()=>{
     buildBtn.disabled=true;
-    setStatus('Tracing masks and building in Blender (headless)... this can take ~10-30s.','');
+    setStatus('',''); logEl.innerHTML=''; setProg(0);
+    logLine('Uploading '+chosen.length+' file(s)...');
     const fd=new FormData();
     chosen.forEach(f=>fd.append('files',f,f.name));
-    fd.append('thickness',num.value);
+    fd.append('thickness',num.value); fd.append('height',heightEl.value);
     try{
       const r=await fetch('/build',{method:'POST',body:fd});
-      const j=await r.json();
-      if(!r.ok || !j.ok){ setStatus(j.message||'Build failed.','err'); buildBtn.disabled=chosen.length===0; return; }
-      let msg=j.message;
+      const reader=r.body.getReader(), dec=new TextDecoder(); let buf='', okMsg=null, failed=false;
+      while(true){
+        const {value,done}=await reader.read(); if(done) break;
+        buf+=dec.decode(value,{stream:true});
+        const lines=buf.split('\\n'); buf=lines.pop();
+        for(const line of lines){
+          if(!line) continue;
+          const sep=line.indexOf('|');
+          const tag=line.slice(0,sep), rest=line.slice(sep+1);
+          if(tag==='P'){ const j=rest.indexOf('|'); setProg(parseInt(rest.slice(0,j))); logLine(rest.slice(j+1)); }
+          else if(tag==='OK'){ okMsg=rest; setProg(100); }
+          else if(tag==='ERR'){ failed=true; logLine(rest,'err'); setStatus(rest,'err'); }
+          else logLine(line);
+        }
+      }
+      if(failed){ buildBtn.disabled=chosen.length===0; return; }
+      let msg=okMsg||'Done.';
       if(dirHandle){
-        try{
-          const buf=await (await fetch('/result.blend')).arrayBuffer();
-          const prep=await dirHandle.getDirectoryHandle('_prep',{create:true});
-          const fh=await prep.getFileHandle('acrylic.blend',{create:true});
-          const w=await fh.createWritable(); await w.write(buf); await w.close();
-          msg+='\\nSaved to '+dirHandle.name+'/_prep/acrylic.blend';
-        }catch(err){ msg+='\\nCould not write into the folder ('+err+'); it is open in Blender, save manually.'; }
+        try{ logLine('Saving .blend into '+dirHandle.name+'/_prep/...'); await writeBlendBack();
+             msg+='\\nSaved to '+dirHandle.name+'/_prep/acrylic.blend'; }
+        catch(err){ msg+='\\nCould not write into the folder ('+err+'); open in Blender, save manually.'; }
       } else {
         msg+='\\nTip: drag a FOLDER (not loose files) so the .blend saves into it.';
       }
-      setStatus(msg,'ok');
+      setProg(100); setStatus(msg,'ok');
     }catch(err){ setStatus('Request failed: '+err,'err'); }
     buildBtn.disabled=chosen.length===0;
   };
@@ -332,25 +373,32 @@ def result_blend():
     return send_from_directory(WORK / "prep", "acrylic.blend")
 
 
+def _is_part(fn):
+    s = fn.lower()
+    return s.endswith(".png") and not (s.endswith("_mask.png") or s.endswith("_bleed.png"))
+
+
 @app.route("/build", methods=["POST"])
 def build():
-    thickness = request.form.get("thickness", "3.0")
+    thickness = request.form.get("thickness", "0.3")
+    height = request.form.get("height", "15")
     try:
         float(thickness)
+        float(height)
     except ValueError:
-        return ("Thickness must be a number.", 400)
+        return Response("ERR|Height and thickness must be numbers.\n", mimetype="text/plain")
 
     uploaded = request.files.getlist("files")
     pngs = [f for f in uploaded if f.filename.lower().endswith(".png")]
     if not pngs:
-        return ("No PNG files received.", 400)
+        return Response("ERR|No PNG files received.\n", mimetype="text/plain")
 
     blender = find_blender()
     if not blender:
-        return ("Blender not found. Set the BLENDER_PATH environment variable to "
-                "your blender.exe and restart this server.", 500)
+        return Response("ERR|Blender not found. Set BLENDER_PATH and restart the server.\n",
+                        mimetype="text/plain")
 
-    # fresh work dir each build
+    # save uploads synchronously (request data isn't available once streaming starts)
     if WORK.exists():
         shutil.rmtree(WORK)
     parts = WORK / "parts"
@@ -358,30 +406,49 @@ def build():
     parts.mkdir(parents=True)
     for f in pngs:
         f.save(str(parts / pathlib.Path(f.filename).name))
+    nparts = max(1, sum(1 for f in pngs if _is_part(f.filename)))
 
-    # stage 1
-    r = subprocess.run(
-        [sys.executable, str(HERE / "prep_masks.py"), str(parts), "-o", str(prep)],
-        capture_output=True, text=True)
-    if r.returncode != 0:
-        return jsonify(ok=False, message=f"Stage 1 (prep_masks) failed:\n{r.stderr or r.stdout}"), 500
+    def gen():
+        def p(pct, msg):
+            return f"P|{pct}|{msg}\n"
 
-    # stage 2: build the .blend headless first (so it exists for write-back), with
-    # textures packed so the copy is portable, then open that built file in the GUI.
-    blend = prep / "acrylic.blend"
-    env = dict(os.environ, ACRYLIC_THICKNESS_MM=str(thickness), ACRYLIC_PACK="1")
-    b = subprocess.run(
-        [blender, "--background", "--factory-startup", "--python",
-         str(HERE / "build_acrylic.py"), "--", str(prep / "manifest.json"), str(blend)],
-        env=env, capture_output=True, text=True)
-    if b.returncode != 0 or not blend.exists():
-        return jsonify(ok=False, message=f"Stage 2 (build_acrylic) failed:\n{b.stderr or b.stdout}"), 500
+        yield p(10, f"Saved {len(pngs)} file(s).")
+        yield p(20, "Tracing masks (stage 1)...")
+        r = subprocess.run(
+            [sys.executable, str(HERE / "prep_masks.py"), str(parts), "-o", str(prep)],
+            capture_output=True, text=True)
+        if r.returncode != 0:
+            yield f"ERR|Stage 1 failed:\n{r.stderr or r.stdout}\n"
+            return
+        yield p(35, "Masks traced. Building in Blender (stage 2)...")
 
-    # open the built standee in the Blender GUI (non-blocking)
-    subprocess.Popen([blender, str(blend)])
+        blend = prep / "acrylic.blend"
+        env = dict(os.environ, ACRYLIC_THICKNESS_CM=str(thickness),
+                   ACRYLIC_HEIGHT_CM=str(height), ACRYLIC_PACK="1")
+        proc = subprocess.Popen(
+            [blender, "--background", "--factory-startup", "--python",
+             str(HERE / "build_acrylic.py"), "--", str(prep / "manifest.json"), str(blend)],
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        built = 0
+        for line in proc.stdout:
+            line = line.rstrip()
+            if line.startswith("  built "):
+                built += 1
+                yield p(35 + int(45 * built / nparts), line.strip())
+            elif "[packed]" in line:
+                yield p(84, "Packed textures into the .blend.")
+        proc.wait()
+        if proc.returncode != 0 or not blend.exists():
+            yield f"ERR|Stage 2 (Blender) failed. See the server console.\n"
+            return
 
-    return jsonify(ok=True,
-                   message=f"Built {len(pngs)} file(s) at {thickness} mm. Opened in Blender.")
+        subprocess.Popen([blender, str(blend)])
+        yield p(95, "Opening in Blender...")
+        yield (f"OK|Built {nparts} piece(s): {height} cm tall, {thickness} cm thick. "
+               f"Opened in Blender.\n")
+
+    return Response(stream_with_context(gen()), mimetype="text/plain",
+                    headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
 
 if __name__ == "__main__":

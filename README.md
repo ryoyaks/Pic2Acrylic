@@ -19,9 +19,15 @@ preview in Blender — before sending anything to an acrylic print shop.
 1. Run **`web-ui.bat`** (installs dependencies on first run, opens the UI).
 2. Drag your **parts folder** in (or click to choose one) — it holds `<part>.png`
    plus an optional `<part>_mask.png` for each piece.
-3. Set the **thickness (mm)** and click **Build** — it opens Blender with the standee
-   assembled (layers fanned apart) and writes a self-contained `acrylic.blend` into a
-   **`_prep` subfolder of your folder**.
+3. Set the **height (cm)** — the real-world height of your *tallest* piece — and the
+   **thickness (cm)**, then click **Build**. A progress bar + log show each stage; it
+   opens Blender with the standee assembled (layers fanned apart) and writes a
+   self-contained `acrylic.blend` into a **`_prep` subfolder of your folder**.
+
+Each piece becomes its own **collection** holding two layers: the printed art and a
+clear acrylic sheet (a single shared **"Acrylic"** material, so you can retune the
+look once for all pieces). Real size comes from the height you enter, not the image
+resolution — paint as large as you like.
 
 > Folder drag + writing the `.blend` back into your folder uses the browser's File
 > System Access API — use a Chromium browser (Edge/Chrome) and allow write access when
@@ -37,8 +43,8 @@ Two stages, because mask tracing needs OpenCV (which Blender's Python lacks):
 | Assemble acrylic in Blender   | `build_acrylic.py` | Blender (`bpy`) |
 
 You can also run them by hand or via `build-acrylic.bat` (drag a folder onto it).
-Key tunables (env vars or top of `build_acrylic.py`): `THICKNESS_MM`, `HEIGHT_MM`,
-`GAP_MM`, `FLIP_V`.
+Units are **centimetres** (1 Blender unit = 1 cm). Key tunables (env vars or top of
+`build_acrylic.py`): `HEIGHT_CM`, `THICKNESS_CM`, `GAP_CM`, `FLIP_V`.
 
 ## Requirements
 

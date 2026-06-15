@@ -27,10 +27,11 @@ import tempfile
 import bpy
 import mathutils
 
-# ---- tunables (env vars let the web UI / .bat override without editing) ----
-THICKNESS_MM = float(os.environ.get("ACRYLIC_THICKNESS_MM", 3.0))  # sheet thickness
-HEIGHT_MM = float(os.environ.get("ACRYLIC_HEIGHT_MM", 150.0))      # canvas height -> this
-GAP_MM = float(os.environ.get("ACRYLIC_GAP_MM", 4.0))             # gap between sheets (depth)
+# ---- tunables in CENTIMETRES (env vars let the web UI / .bat override) ----
+# After build, 1 Blender unit == 1 cm.
+THICKNESS_CM = float(os.environ.get("ACRYLIC_THICKNESS_CM", 0.3))  # sheet thickness (0.3cm = 3mm)
+HEIGHT_CM = float(os.environ.get("ACRYLIC_HEIGHT_CM", 15.0))       # real height of the TALLEST piece
+GAP_CM = float(os.environ.get("ACRYLIC_GAP_CM", 0.4))             # gap between sheets (depth)
 FLIP_V = os.environ.get("ACRYLIC_FLIP_V", "0").lower() in ("1", "true", "yes")
 # ---------------------------------------------------------------------------
 
@@ -157,38 +158,52 @@ def set_principled(bsdf, name, value):
         bsdf.inputs[name].default_value = value
 
 
-def make_material(name, image_path):
-    """Transparent acrylic where the texture is clear; opaque print where it isn't."""
-    mat = bpy.data.materials.new(name=f"{name}_acrylic")
+def acrylic_material():
+    """One shared clear-acrylic material reused by every piece, so the user can
+    tweak the look once (colour/roughness/tint) and it applies to all sheets."""
+    existing = bpy.data.materials.get("Acrylic")
+    if existing:
+        return existing
+    mat = bpy.data.materials.new(name="Acrylic")
+    mat.use_nodes = True
+    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    set_principled(bsdf, "Base Color", (1.0, 1.0, 1.0, 1.0))
+    set_principled(bsdf, "Roughness", 0.03)
+    set_principled(bsdf, "IOR", 1.49)
+    if "Transmission Weight" in bsdf.inputs:        # Blender 4.x / 5.x
+        bsdf.inputs["Transmission Weight"].default_value = 1.0
+    elif "Transmission" in bsdf.inputs:             # older
+        bsdf.inputs["Transmission"].default_value = 1.0
+    # make transmission show up in EEVEE (attr names vary by version)
+    for attr in ("use_screen_refraction", "use_raytrace_refraction"):
+        try:
+            setattr(mat, attr, True)
+        except Exception:
+            pass
+    return mat
+
+
+def print_material(name, image_path):
+    """Per-part printed-ink layer: textured, transparent where the art is clear."""
+    mat = bpy.data.materials.new(name=f"{name}_print")
     mat.use_nodes = True
     nt = mat.node_tree
-    nt.nodes.clear()
-
-    out = nt.nodes.new("ShaderNodeOutputMaterial")
-    mix = nt.nodes.new("ShaderNodeMixShader")
-    glass = nt.nodes.new("ShaderNodeBsdfPrincipled")    # clear acrylic
-    printed = nt.nodes.new("ShaderNodeBsdfPrincipled")  # printed ink
+    bsdf = nt.nodes.get("Principled BSDF")
     tex = nt.nodes.new("ShaderNodeTexImage")
-
     img = bpy.data.images.load(str(image_path), check_existing=True)
     tex.image = img
     tex.interpolation = "Cubic"
-
-    set_principled(glass, "Roughness", 0.03)
-    set_principled(glass, "IOR", 1.49)
-    # Transmission input was renamed across versions.
-    if "Transmission Weight" in glass.inputs:       # Blender 4.x / 5.x
-        glass.inputs["Transmission Weight"].default_value = 1.0
-    elif "Transmission" in glass.inputs:            # older
-        glass.inputs["Transmission"].default_value = 1.0
-
-    set_principled(printed, "Roughness", 0.45)
-
-    nt.links.new(tex.outputs["Color"], printed.inputs["Base Color"])
-    nt.links.new(tex.outputs["Alpha"], mix.inputs["Fac"])
-    nt.links.new(glass.outputs["BSDF"], mix.inputs[1])    # Fac=0 -> clear acrylic
-    nt.links.new(printed.outputs["BSDF"], mix.inputs[2])  # Fac=1 -> printed
-    nt.links.new(mix.outputs["Shader"], out.inputs["Surface"])
+    set_principled(bsdf, "Roughness", 0.45)
+    nt.links.new(tex.outputs["Color"], bsdf.inputs["Base Color"])
+    nt.links.new(tex.outputs["Alpha"], bsdf.inputs["Alpha"])
+    # transparent where alpha==0 (EEVEE blend property differs across versions)
+    for attr, val in (("blend_method", "BLEND"),
+                      ("surface_render_method", "BLENDED"),
+                      ("show_transparent_back", False)):
+        try:
+            setattr(mat, attr, val)
+        except Exception:
+            pass
     return mat
 
 
@@ -227,80 +242,117 @@ def build(manifest_path):
     ensure_svg_addon()
     clear_scene()
 
-    w = parts[0]["width_px"]
-    h = parts[0]["height_px"]
-    frame = measure_reference_frame(w, h)
+    frame = measure_reference_frame(parts[0]["width_px"], parts[0]["height_px"])
     print(f"[frame] world bbox {frame}")
 
-    pieces = []
+    acrylic_mat = acrylic_material()
+    scene_coll = bpy.context.scene.collection
+
+    piece_objs = []   # [(acrylic_obj, print_obj), ...]
+    all_objs = []
     for part in parts:
-        svg_path = os.path.join(manifest_dir, part["svg"])
-        objs = import_svg(svg_path)
-        obj = curves_to_mesh(objs, part["name"])
-        assign_uv(obj, frame)
+        name = part["name"]
+        base = curves_to_mesh(import_svg(os.path.join(manifest_dir, part["svg"])), name)
+        assign_uv(base, frame)
+
+        # Print layer: the flat cut-shape carrying the textured (alpha-masked) ink.
         tex_path = resolve_texture(part, manifest_dir)
         if not os.path.exists(tex_path):
-            print(f"  WARNING: texture not found for {part['name']}: {tex_path}")
-        # The SVG importer seeds slot 0 with its own 'SVGMat'; clear it so our
-        # acrylic material lands in slot 0 and the faces actually use it.
-        obj.data.materials.clear()
-        obj.data.materials.append(make_material(part["name"], tex_path))
+            print(f"  WARNING: texture not found for {name}: {tex_path}")
+        prt = base
+        prt.name = f"{name}_print"
+        prt.data.materials.clear()                       # drop the importer's SVGMat
+        prt.data.materials.append(print_material(name, tex_path))
 
-        solid = obj.modifiers.new("Solidify", "SOLIDIFY")
-        solid.thickness = THICKNESS_MM
+        # Acrylic layer: a copy of the cut-shape, solidified, with the shared material.
+        acr = prt.copy()
+        acr.data = prt.data.copy()
+        acr.name = f"{name}_acrylic"
+        acr.data.materials.clear()
+        acr.data.materials.append(acrylic_mat)
+        solid = acr.modifiers.new("Solidify", "SOLIDIFY")
+        solid.thickness = THICKNESS_CM
         solid.offset = 0.0
-        pieces.append(obj)
-        print(f"  built {part['name']}")
 
-    # Every piece shares the SVG importer's origin, so applying the same scale and
-    # rotation to each one (no parent) keeps them mutually aligned -- and leaves the
-    # pieces independent so you can grab and rotate any one without dragging the rest.
+        # Group the two layers in their own collection.
+        coll = bpy.data.collections.new(name)
+        scene_coll.children.link(coll)
+        for c in list(prt.users_collection):
+            c.objects.unlink(prt)
+        coll.objects.link(prt)
+        coll.objects.link(acr)
 
-    # Scale so 1 BU == 1 mm (canvas height -> HEIGHT_MM). Baking scale to 1.0 is what
-    # makes Solidify's THICKNESS_MM read as real millimetres on the final-size mesh.
-    frame_h = (frame[3] - frame[1]) or 1.0
-    s = HEIGHT_MM / frame_h
-    for obj in pieces:
-        obj.scale = (s, s, s)
-    apply_transform(pieces, scale=True)
+        piece_objs.append((acr, prt))
+        all_objs.extend((acr, prt))
+        print(f"  built {name}")
+
+    # --- real-world scale from the TALLEST piece, not the canvas ---
+    # Users paint on arbitrarily large canvases, so pixel size can't imply real size.
+    # Map the tallest piece's height to HEIGHT_CM; everything else follows that ratio,
+    # and 1 BU becomes 1 cm (so THICKNESS_CM is a true thickness, no mesh shrinking).
+    bpy.context.view_layer.update()
+
+    def y_extent(o):
+        ys = [(o.matrix_world @ mathutils.Vector(c)).y for c in o.bound_box]
+        return max(ys) - min(ys)
+
+    tallest = max(y_extent(p) for _, p in piece_objs) or 1.0
+    s = HEIGHT_CM / tallest
+    for o in all_objs:
+        o.scale = (s, s, s)
+    apply_transform(all_objs, scale=True)
 
     # Stand upright (+X tilt), about the shared origin so alignment is preserved.
-    for obj in pieces:
-        obj.rotation_euler = (math.pi / 2.0, 0.0, 0.0)
-    apply_transform(pieces, rotation=True)
+    for o in all_objs:
+        o.rotation_euler = (math.pi / 2.0, 0.0, 0.0)
+    apply_transform(all_objs, rotation=True)
 
-    # Drop the whole set onto the floor (min Z -> 0) and centre it in X, shifting
-    # every piece by the SAME amount so they stay registered to each other.
+    # Drop onto the floor (min Z -> 0) and centre in X, same shift for every object.
     bpy.context.view_layer.update()
     zs, xs = [], []
-    for obj in pieces:
-        for corner in obj.bound_box:
-            w = obj.matrix_world @ mathutils.Vector(corner)
+    for o in all_objs:
+        for c in o.bound_box:
+            w = o.matrix_world @ mathutils.Vector(c)
             zs.append(w.z)
             xs.append(w.x)
     dz, dx = -min(zs), -(min(xs) + max(xs)) / 2.0
-    for obj in pieces:
-        obj.location.x += dx
-        obj.location.z += dz
+    for o in all_objs:
+        o.location.x += dx
+        o.location.z += dz
 
-    # Give each piece its own origin at its geometry centre, so it rotates about
-    # itself instead of some shared far-away point.
+    # Per-object origin at its own geometry centre (intuitive rotation).
     bpy.context.view_layer.update()
-    for obj in pieces:
-        with bpy.context.temp_override(active_object=obj,
-                                       selected_objects=[obj],
-                                       selected_editable_objects=[obj]):
+    for o in all_objs:
+        with bpy.context.temp_override(active_object=o, selected_objects=[o],
+                                       selected_editable_objects=[o]):
             bpy.ops.object.origin_set(type="ORIGIN_GEOMETRY", center="MEDIAN")
 
-    # Fan the pieces apart in depth (Y) so they don't overlap, keeping the front
-    # view aligned. Centre the spread around Y=0.
-    pitch = THICKNESS_MM + GAP_MM
-    n = len(pieces)
-    for i, obj in enumerate(pieces):
-        obj.location.y += (i - (n - 1) / 2.0) * pitch
+    # Fan pieces apart in depth (Y); both layers of a piece move together. The print
+    # sits just in front of its acrylic sheet's front face so the art is clearly visible.
+    pitch = THICKNESS_CM + GAP_CM
+    n = len(piece_objs)
+    front = THICKNESS_CM / 2.0 + 0.02
+    for i, (acr, prt) in enumerate(piece_objs):
+        dy = (i - (n - 1) / 2.0) * pitch
+        acr.location.y += dy
+        prt.location.y += dy - front
 
-    print(f"[done] {len(pieces)} piece(s)")
-    return pieces
+    # Remove the empty collections the SVG importer leaves behind (one per .svg).
+    for c in list(bpy.data.collections):
+        if not c.objects and not c.children:
+            try:
+                bpy.data.collections.remove(c)
+            except Exception:
+                pass
+
+    # Make the clear acrylic actually read as transparent in EEVEE.
+    try:
+        bpy.context.scene.eevee.use_raytracing = True
+    except Exception:
+        pass
+
+    print(f"[done] {len(piece_objs)} piece(s)")
+    return all_objs
 
 
 def main():
