@@ -62,26 +62,41 @@ def opaque_from_alpha(img_rgba, alpha_threshold):
 
 
 def trace_to_svg(opaque, dilate_px, simplify_px):
-    """Trace the largest external contour of a binary keep-region.
+    """Trace the keep-region: outer outline(s) AND internal holes (rebates/cut-outs).
 
     `simplify_px` is an absolute pixel tolerance: a small value keeps curves smooth
     (points stay dense along curves, sparse along straight edges); 0 keeps every point.
 
-    Returns (svg_path_d, contour_points) or (None, None) if nothing was found.
+    Returns (svg_path_d, contours) or (None, None) if nothing was found. The path uses
+    even-odd fill so nested hole contours are cut out of the shape.
     """
     m = (opaque * 255).astype("uint8")
     if dilate_px > 0:
         k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * dilate_px + 1,) * 2)
         m = cv2.dilate(m, k)
-    cnts, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not cnts:
+    cnts, hier = cv2.findContours(m, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+    if not cnts or hier is None:
         return None, None
-    c = max(cnts, key=cv2.contourArea)
-    if simplify_px > 0:
-        c = cv2.approxPolyDP(c, simplify_px, True)
-    c = c.reshape(-1, 2)
-    d = "M " + " L ".join(f"{x} {y}" for x, y in c) + " Z"
-    return d, c
+    hier = hier[0]                       # [next, prev, first_child, parent]
+    areas = [cv2.contourArea(c) for c in cnts]
+    max_area = max(areas) or 1.0
+
+    subpaths, contours = [], []
+    for i, c in enumerate(cnts):
+        is_hole = hier[i][3] != -1
+        # keep significant outer pieces and real holes; drop speckle noise
+        thresh = 0.004 * max_area if not is_hole else max(80.0, 0.00008 * max_area)
+        if areas[i] < thresh:
+            continue
+        cc = cv2.approxPolyDP(c, simplify_px, True) if simplify_px > 0 else c
+        cc = cc.reshape(-1, 2)
+        if len(cc) < 3:
+            continue
+        subpaths.append("M " + " L ".join(f"{x} {y}" for x, y in cc) + " Z")
+        contours.append(cc)
+    if not subpaths:
+        return None, None
+    return " ".join(subpaths), contours
 
 
 def write_svg(out_path, d, w, h):
@@ -89,18 +104,18 @@ def write_svg(out_path, d, w, h):
     svg = (
         f'<svg xmlns="http://www.w3.org/2000/svg" '
         f'width="{w}" height="{h}" viewBox="0 0 {w} {h}">\n'
-        f'  <path d="{d}" fill="black"/>\n'
+        f'  <path d="{d}" fill="black" fill-rule="evenodd"/>\n'
         f"</svg>\n"
     )
     out_path.write_text(svg, encoding="utf-8")
 
 
-def write_check(out_path, img_rgba, contour):
-    """Save the source image with the red cut-line drawn over it, for eyeballing."""
+def write_check(out_path, img_rgba, contours):
+    """Save the source image with the red cut-lines (outline + holes) drawn over it."""
     bgr = cv2.cvtColor(img_rgba, cv2.COLOR_RGBA2BGR)
     # line thickness scales with image size so it stays visible on huge canvases
     t = max(2, round(max(img_rgba.shape[:2]) / 600))
-    cv2.polylines(bgr, [contour.reshape(-1, 1, 2)], True, (0, 0, 255), t)
+    cv2.polylines(bgr, [c.reshape(-1, 1, 2) for c in contours], True, (0, 0, 255), t)
     cv2.imwrite(str(out_path), bgr)
 
 
@@ -160,14 +175,14 @@ def main(argv=None):
             opaque = opaque_from_alpha(img_rgba, args.alpha_threshold)
             src = "image-alpha"
 
-        d, contour = trace_to_svg(opaque, args.bleed_px, args.simplify)
+        d, contours = trace_to_svg(opaque, args.bleed_px, args.simplify)
         if d is None:
             print(f"  SKIP {name}: empty mask", file=sys.stderr)
             continue
 
         svg_name = f"{name}_mask.svg"
         write_svg(out_dir / svg_name, d, w, h)
-        write_check(out_dir / f"{name}_check.png", img_rgba, contour)
+        write_check(out_dir / f"{name}_check.png", img_rgba, contours)
 
         texture = bleed_png.name if bleed_png.exists() else main_png.name
         entry = {
@@ -181,8 +196,10 @@ def main(argv=None):
         if back_png.exists():                       # auto-detected back-side art
             entry["texture_back"] = back_png.name
         manifest["parts"].append(entry)
-        print(f"  {name}: {len(contour)} pts (from {src}) -> {svg_name}"
-              f"{' [+back]' if back_png.exists() else ''}")
+        pts = sum(len(c) for c in contours)
+        holes = max(0, len(contours) - 1)
+        print(f"  {name}: {pts} pts, {len(contours)} contour(s) ({holes} hole/extra) "
+              f"(from {src}) -> {svg_name}{' [+back]' if back_png.exists() else ''}")
 
     (out_dir / "manifest.json").write_text(
         json.dumps(manifest, indent=2), encoding="utf-8")
