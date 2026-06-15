@@ -24,7 +24,9 @@ import numpy as np
 from PIL import Image
 
 ALPHA_THRESHOLD_DEFAULT = 10
-SIMPLIFY_DEFAULT = 0.0015
+# approxPolyDP tolerance in PIXELS (absolute, so it doesn't scale up on big canvases
+# and flatten curves). Small = smoother curves; 0 = keep the raw contour.
+SIMPLIFY_PX_DEFAULT = 1.5
 
 
 def load_rgba(path):
@@ -58,8 +60,11 @@ def opaque_from_alpha(img_rgba, alpha_threshold):
     return (img_rgba[..., 3] >= alpha_threshold).astype("float32")
 
 
-def trace_to_svg(opaque, dilate_px, simplify):
+def trace_to_svg(opaque, dilate_px, simplify_px):
     """Trace the largest external contour of a binary keep-region.
+
+    `simplify_px` is an absolute pixel tolerance: a small value keeps curves smooth
+    (points stay dense along curves, sparse along straight edges); 0 keeps every point.
 
     Returns (svg_path_d, contour_points) or (None, None) if nothing was found.
     """
@@ -71,7 +76,9 @@ def trace_to_svg(opaque, dilate_px, simplify):
     if not cnts:
         return None, None
     c = max(cnts, key=cv2.contourArea)
-    c = cv2.approxPolyDP(c, simplify * cv2.arcLength(c, True), True).reshape(-1, 2)
+    if simplify_px > 0:
+        c = cv2.approxPolyDP(c, simplify_px, True)
+    c = c.reshape(-1, 2)
     d = "M " + " L ".join(f"{x} {y}" for x, y in c) + " Z"
     return d, c
 
@@ -112,8 +119,8 @@ def main(argv=None):
     ap.add_argument("parts_dir", help="folder containing <part>.png (+ optional _mask/_bleed)")
     ap.add_argument("-o", "--out", required=True, help="output folder")
     ap.add_argument("--bleed-px", type=int, default=0, help="dilate the cut-shape outward by N px")
-    ap.add_argument("--simplify", type=float, default=SIMPLIFY_DEFAULT,
-                    help="approxPolyDP epsilon as a fraction of perimeter")
+    ap.add_argument("--simplify", type=float, default=SIMPLIFY_PX_DEFAULT,
+                    help="approxPolyDP epsilon in pixels (lower = smoother curves; 0 = raw)")
     ap.add_argument("--alpha-threshold", type=int, default=ALPHA_THRESHOLD_DEFAULT,
                     help="alpha value at/above which a pixel counts as kept")
     args = ap.parse_args(argv)
