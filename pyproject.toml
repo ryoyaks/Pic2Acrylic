@@ -1,0 +1,18 @@
+[project]
+name = "pic2acrylic"
+version = "0.1.0"
+description = "Preview layered art as printed transparent-acrylic standee pieces."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "opencv-python-headless>=4.8",
+    "pillow>=10",
+    "numpy>=1.24",
+    "flask>=3",
+]
+
+# This is an application, not an installable library. uv just manages the deps for
+# the system-Python side (prep_masks.py + web_ui.py). Stage 2 (build_acrylic.py)
+# runs inside Blender's OWN bundled Python and is not managed here.
+[tool.uv]
+package = false

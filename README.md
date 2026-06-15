@@ -16,7 +16,8 @@ preview in Blender — before sending anything to an acrylic print shop.
 
 ## Quick start
 
-1. Run **`web-ui.bat`** (installs dependencies on first run, opens the UI).
+1. Run **`web-ui.bat`** ([uv](https://docs.astral.sh/uv/) sets up the environment on
+   first run, then opens the UI). Or directly: `uv run python web_ui.py`.
 2. Drag your **parts folder** in (or click to choose one) — it holds `<part>.png`
    plus an optional `<part>_mask.png` for each piece.
 3. Set the **height (cm)** — the real-world height of your *tallest* piece — and the
@@ -39,8 +40,8 @@ Two stages, because mask tracing needs OpenCV (which Blender's Python lacks):
 
 | Stage | Script | Runtime |
 |---|---|---|
-| Trace masks → SVG + manifest | `prep_masks.py` | system Python 3 |
-| Assemble acrylic in Blender   | `build_acrylic.py` | Blender (`bpy`) |
+| Trace masks → SVG + manifest | `prep_masks.py` | uv-managed Python |
+| Assemble acrylic in Blender   | `build_acrylic.py` | Blender's own Python (`bpy`) |
 
 You can also run them by hand or via `build-acrylic.bat` (drag a folder onto it).
 Units are **centimetres** (1 Blender unit = 1 cm). Key tunables (env vars or top of
@@ -48,5 +49,8 @@ Units are **centimetres** (1 Blender unit = 1 cm). Key tunables (env vars or top
 
 ## Requirements
 
-- Python 3 (`opencv-python-headless`, `pillow`, `numpy`, `flask` — auto-installed)
-- Blender (5.0 tested; found via `BLENDER_PATH`, `PATH`, Program Files, or Steam)
+- **[uv](https://docs.astral.sh/uv/)** — manages the Python deps for the tracing/web
+  side (`opencv-python-headless`, `pillow`, `numpy`, `flask`); see `pyproject.toml` /
+  `uv.lock`. Run things with `uv run …`.
+- **Blender** (5.0 tested; found via `BLENDER_PATH`, `PATH`, Program Files, or Steam).
+  Stage 2 runs inside Blender's bundled Python, so its deps are *not* managed by uv.

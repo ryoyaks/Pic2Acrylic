@@ -9,6 +9,7 @@ _web_work/
 *.blend
 *.blend1
 
-# python
+# python / uv
 __pycache__/
 *.pyc
+.venv/
