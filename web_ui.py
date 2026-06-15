@@ -285,9 +285,10 @@ PAGE = """<!doctype html>
       const img=document.createElement('img'); img.src=URL.createObjectURL(f);
       img.onload=()=>URL.revokeObjectURL(img.src);
       const nm=document.createElement('span'); nm.className='nm'; nm.textContent=f.name;
-      const isMask=/_mask\\.png$/i.test(f.name), isBleed=/_bleed\\.png$/i.test(f.name);
-      if(isMask||isBleed){ const t=document.createElement('span'); t.className='tag mask';
-        t.textContent=isMask?'mask':'bleed'; nm.appendChild(document.createTextNode(' ')); nm.appendChild(t); }
+      const isMask=/_mask\\.png$/i.test(f.name), isBleed=/_bleed\\.png$/i.test(f.name),
+            isBack=/_back\\.png$/i.test(f.name);
+      if(isMask||isBleed||isBack){ const t=document.createElement('span'); t.className='tag mask';
+        t.textContent=isMask?'mask':(isBack?'back':'bleed'); nm.appendChild(document.createTextNode(' ')); nm.appendChild(t); }
       const sz=document.createElement('span'); sz.className='sz'; sz.textContent=(f.size/1048576).toFixed(1)+' MB';
       const rm=document.createElement('button'); rm.className='rm'; rm.textContent='\\u00d7';
       rm.onclick=()=>{ chosen.splice(i,1); render(); };
