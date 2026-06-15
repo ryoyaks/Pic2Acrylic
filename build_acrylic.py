@@ -30,6 +30,7 @@ import mathutils
 # ---- tunables (env vars let the web UI / .bat override without editing) ----
 THICKNESS_MM = float(os.environ.get("ACRYLIC_THICKNESS_MM", 3.0))  # sheet thickness
 HEIGHT_MM = float(os.environ.get("ACRYLIC_HEIGHT_MM", 150.0))      # canvas height -> this
+GAP_MM = float(os.environ.get("ACRYLIC_GAP_MM", 4.0))             # gap between sheets (depth)
 FLIP_V = os.environ.get("ACRYLIC_FLIP_V", "0").lower() in ("1", "true", "yes")
 # ---------------------------------------------------------------------------
 
@@ -290,6 +291,13 @@ def build(manifest_path):
                                        selected_objects=[obj],
                                        selected_editable_objects=[obj]):
             bpy.ops.object.origin_set(type="ORIGIN_GEOMETRY", center="MEDIAN")
+
+    # Fan the pieces apart in depth (Y) so they don't overlap, keeping the front
+    # view aligned. Centre the spread around Y=0.
+    pitch = THICKNESS_MM + GAP_MM
+    n = len(pieces)
+    for i, obj in enumerate(pieces):
+        obj.location.y += (i - (n - 1) / 2.0) * pitch
 
     print(f"[done] {len(pieces)} piece(s)")
     return pieces

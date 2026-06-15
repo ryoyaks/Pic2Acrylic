@@ -71,6 +71,8 @@ blender --background --python build_acrylic.py -- <out_dir>\manifest.json <out_d
 - `THICKNESS_MM` (default 3.0) — acrylic sheet thickness. Env: `ACRYLIC_THICKNESS_MM`.
 - `HEIGHT_MM` (default 150.0) — final standee height; the canvas height maps to this.
   Env: `ACRYLIC_HEIGHT_MM`.
+- `GAP_MM` (default 4.0) — gap between pieces along depth, so layers don't overlap
+  but stay aligned head-on. Env: `ACRYLIC_GAP_MM` (set 0 to keep them coplanar).
 - `FLIP_V` (default False) — flip if the printed texture comes out upside-down.
   Env: `ACRYLIC_FLIP_V=1`.
 
