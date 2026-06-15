@@ -312,6 +312,15 @@ def main():
 
     build(manifest_path)
 
+    # Optional: embed the textures so the .blend is portable (web UI sets this,
+    # since its .blend gets copied into the user's folder away from the images).
+    if os.environ.get("ACRYLIC_PACK", "0").lower() in ("1", "true", "yes"):
+        try:
+            bpy.ops.file.pack_all()
+            print("[packed] textures embedded")
+        except Exception as e:
+            print(f"[pack] skipped: {e}")
+
     if out_blend:
         out_blend = os.path.abspath(out_blend)
         bpy.ops.wm.save_as_mainfile(filepath=out_blend)

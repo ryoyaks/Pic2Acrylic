@@ -14,7 +14,7 @@ import shutil
 import subprocess
 import sys
 
-from flask import Flask, request, render_template_string, send_from_directory
+from flask import Flask, request, render_template_string, send_from_directory, jsonify
 
 HERE = pathlib.Path(__file__).resolve().parent
 WORK = HERE / "_web_work"          # uploads + prep output live here (gitignored)
@@ -191,8 +191,8 @@ PAGE = """<!doctype html>
         <svg class="ic" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#6ea8ff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <path d="M12 16V4M12 4l-4 4M12 4l4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
         </svg>
-        <div><b>Drag part PNGs here</b>, or click to choose</div>
-        <div style="font-size:12px;margin-top:5px;opacity:.8">&lt;part&gt;.png + optional &lt;part&gt;_mask.png</div>
+        <div><b>Drag your parts folder here</b>, or click to choose a folder</div>
+        <div style="font-size:12px;margin-top:5px;opacity:.8">&lt;part&gt;.png + optional &lt;part&gt;_mask.png &middot; build saved to <code>&lt;folder&gt;/_prep/</code></div>
       </div>
       <input id="picker" type="file" accept=".png,image/png" multiple hidden>
       <ul id="files"></ul>
@@ -221,14 +221,10 @@ PAGE = """<!doctype html>
         list=document.getElementById('files'), buildBtn=document.getElementById('build'),
         statusEl=document.getElementById('status'),
         range=document.getElementById('trange'), num=document.getElementById('thickness');
-  let chosen=[];
+  let chosen=[], dirHandle=null;
 
   function setStatus(m,c){ statusEl.textContent=m; statusEl.className=(m?'show ':'')+(c||''); }
-  function addFiles(fl){
-    for(const f of fl)
-      if(f.name.toLowerCase().endsWith('.png') && !chosen.some(c=>c.name===f.name)) chosen.push(f);
-    render();
-  }
+
   function render(){
     list.innerHTML='';
     chosen.forEach((f,i)=>{
@@ -247,24 +243,73 @@ PAGE = """<!doctype html>
     buildBtn.disabled = chosen.length===0;
   }
 
-  drop.onclick=()=>picker.click();
-  picker.onchange=e=>addFiles(e.target.files);
+  function addFiles(fl){
+    for(const f of fl)
+      if(f.name.toLowerCase().endsWith('.png') && !chosen.some(c=>c.name===f.name)) chosen.push(f);
+    render();
+  }
+
+  async function useDirectory(handle){
+    dirHandle=handle;
+    try{ if(handle.requestPermission) await handle.requestPermission({mode:'readwrite'}); }catch(_){}
+    chosen=[];
+    for await (const [name,h] of handle.entries())
+      if(h.kind==='file' && name.toLowerCase().endsWith('.png')) chosen.push(await h.getFile());
+    render();
+    setStatus(chosen.length
+      ? 'Folder \"'+handle.name+'\" - '+chosen.length+' PNG(s). Build saves to '+handle.name+'/_prep/.'
+      : 'No PNGs found in that folder.', chosen.length?'':'err');
+  }
+
+  drop.onclick=async()=>{
+    if(window.showDirectoryPicker){
+      try{ await useDirectory(await window.showDirectoryPicker({mode:'readwrite'})); }catch(_){}
+    } else { picker.click(); }
+  };
+  picker.onchange=e=>{ dirHandle=null; addFiles(e.target.files); };
+
   ['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('hover');}));
-  ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('hover');}));
-  drop.addEventListener('drop',e=>addFiles(e.dataTransfer.files));
+  drop.addEventListener('dragleave',e=>{e.preventDefault();drop.classList.remove('hover');});
+  drop.addEventListener('drop',async e=>{
+    e.preventDefault(); drop.classList.remove('hover');
+    const loose=e.dataTransfer.files;
+    let promises=[];
+    if(window.DataTransferItem && DataTransferItem.prototype.getAsFileSystemHandle)
+      promises=[...e.dataTransfer.items].filter(it=>it.kind==='file').map(it=>it.getAsFileSystemHandle());
+    for(const p of promises){
+      try{ const h=await p; if(h && h.kind==='directory'){ await useDirectory(h); return; } }catch(_){}
+    }
+    dirHandle=null; addFiles(loose);
+  });
 
   range.oninput=()=>{ num.value=range.value; };
   num.oninput=()=>{ const v=parseFloat(num.value); if(!isNaN(v)) range.value=Math.min(10,Math.max(1,v)); };
 
   buildBtn.onclick=async()=>{
-    buildBtn.disabled=true; setStatus('Tracing masks and launching Blender...','');
+    buildBtn.disabled=true;
+    setStatus('Tracing masks and building in Blender (headless)... this can take ~10-30s.','');
     const fd=new FormData();
     chosen.forEach(f=>fd.append('files',f,f.name));
     fd.append('thickness',num.value);
-    try{ const r=await fetch('/build',{method:'POST',body:fd}); const t=await r.text();
-         setStatus(t, r.ok?'ok':'err'); }
-    catch(err){ setStatus('Request failed: '+err,'err'); }
-    buildBtn.disabled = chosen.length===0;
+    try{
+      const r=await fetch('/build',{method:'POST',body:fd});
+      const j=await r.json();
+      if(!r.ok || !j.ok){ setStatus(j.message||'Build failed.','err'); buildBtn.disabled=chosen.length===0; return; }
+      let msg=j.message;
+      if(dirHandle){
+        try{
+          const buf=await (await fetch('/result.blend')).arrayBuffer();
+          const prep=await dirHandle.getDirectoryHandle('_prep',{create:true});
+          const fh=await prep.getFileHandle('acrylic.blend',{create:true});
+          const w=await fh.createWritable(); await w.write(buf); await w.close();
+          msg+='\\nSaved to '+dirHandle.name+'/_prep/acrylic.blend';
+        }catch(err){ msg+='\\nCould not write into the folder ('+err+'); it is open in Blender, save manually.'; }
+      } else {
+        msg+='\\nTip: drag a FOLDER (not loose files) so the .blend saves into it.';
+      }
+      setStatus(msg,'ok');
+    }catch(err){ setStatus('Request failed: '+err,'err'); }
+    buildBtn.disabled=chosen.length===0;
   };
 </script>
 </body>
@@ -279,6 +324,12 @@ def index():
 @app.route("/logo.png")
 def logo():
     return send_from_directory(HERE / "assets", "logo.png")
+
+
+@app.route("/result.blend")
+def result_blend():
+    """The last built .blend, so the browser can copy it into the user's folder."""
+    return send_from_directory(WORK / "prep", "acrylic.blend")
 
 
 @app.route("/build", methods=["POST"])
@@ -313,17 +364,24 @@ def build():
         [sys.executable, str(HERE / "prep_masks.py"), str(parts), "-o", str(prep)],
         capture_output=True, text=True)
     if r.returncode != 0:
-        return (f"Stage 1 (prep_masks) failed:\n{r.stderr or r.stdout}", 500)
+        return jsonify(ok=False, message=f"Stage 1 (prep_masks) failed:\n{r.stderr or r.stdout}"), 500
 
-    # stage 2: launch Blender GUI (non-blocking) with thickness via env
-    env = dict(os.environ, ACRYLIC_THICKNESS_MM=str(thickness))
-    subprocess.Popen(
-        [blender, "--python", str(HERE / "build_acrylic.py"), "--",
-         str(prep / "manifest.json"), str(prep / "acrylic.blend")],
-        env=env)
+    # stage 2: build the .blend headless first (so it exists for write-back), with
+    # textures packed so the copy is portable, then open that built file in the GUI.
+    blend = prep / "acrylic.blend"
+    env = dict(os.environ, ACRYLIC_THICKNESS_MM=str(thickness), ACRYLIC_PACK="1")
+    b = subprocess.run(
+        [blender, "--background", "--factory-startup", "--python",
+         str(HERE / "build_acrylic.py"), "--", str(prep / "manifest.json"), str(blend)],
+        env=env, capture_output=True, text=True)
+    if b.returncode != 0 or not blend.exists():
+        return jsonify(ok=False, message=f"Stage 2 (build_acrylic) failed:\n{b.stderr or b.stdout}"), 500
 
-    return (f"Prepared {len(pngs)} file(s) at {thickness} mm thickness.\n"
-            f"{r.stdout.strip()}\nLaunching Blender...")
+    # open the built standee in the Blender GUI (non-blocking)
+    subprocess.Popen([blender, str(blend)])
+
+    return jsonify(ok=True,
+                   message=f"Built {len(pngs)} file(s) at {thickness} mm. Opened in Blender.")
 
 
 if __name__ == "__main__":
