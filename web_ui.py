@@ -135,16 +135,15 @@ PAGE = """<!doctype html>
   .tag{font-size:10px; padding:1px 7px; border-radius:999px; border:1px solid var(--line); color:var(--muted);}
   .tag.mask{color:var(--accent2); border-color:rgba(157,123,255,.4);}
 
-  .controls{display:flex; align-items:center; gap:16px; margin-top:20px; flex-wrap:wrap;}
-  .field{display:flex; align-items:center; gap:10px;}
-  .field label{font-size:13px; color:#c3cad8; white-space:nowrap;}
-  .thick{flex:1; min-width:210px;}
+  .controls{display:flex; flex-direction:column; align-items:stretch; gap:14px; margin-top:20px;}
+  .field{display:flex; align-items:center; gap:12px;}
+  .field label{font-size:13px; color:#c3cad8; white-space:nowrap; width:96px;}
   input[type=range]{flex:1; accent-color:var(--accent); min-width:80px;}
   input[type=number]{width:68px; background:#0e1117; border:1px solid #333b48; color:var(--ink);
         border-radius:8px; padding:8px 8px; font-size:14px;}
   .unit{color:var(--muted); font-size:13px; margin-left:-6px;}
 
-  button#build{margin-left:auto; display:flex; align-items:center; gap:8px;
+  button#build{align-self:flex-end; display:flex; align-items:center; gap:8px;
         background:linear-gradient(180deg,var(--accent),#5b86ff); color:#0a1020; border:0;
         font-weight:700; padding:12px 20px; border-radius:11px; font-size:14px; cursor:pointer;
         box-shadow:0 6px 18px rgba(91,134,255,.35);}
@@ -210,7 +209,7 @@ PAGE = """<!doctype html>
 
       <div class="controls">
         <div class="field" title="Real-world height of the TALLEST piece; everything else scales to match.">
-          <label for="height">Height</label>
+          <label for="height">Max Height</label>
           <input id="height" type="number" min="1" step="0.5" value="15">
           <span class="unit">cm</span>
         </div>
