@@ -188,19 +188,11 @@ def acrylic_material():
     return mat
 
 
-def _image_node(nt, path, flip_u=False):
-    """An Image Texture node; flip_u mirrors horizontally (for back-side art so it
-    reads correctly when viewed from behind the sheet)."""
+def _image_node(nt, path):
+    """An Image Texture node for the given file (default UV coordinates)."""
     tex = nt.nodes.new("ShaderNodeTexImage")
     tex.image = bpy.data.images.load(str(path), check_existing=True)
     tex.interpolation = "Cubic"
-    if flip_u:
-        uv = nt.nodes.new("ShaderNodeTexCoord")
-        mp = nt.nodes.new("ShaderNodeMapping")
-        mp.inputs["Scale"].default_value = (-1.0, 1.0, 1.0)
-        mp.inputs["Location"].default_value = (1.0, 0.0, 0.0)
-        nt.links.new(uv.outputs["UV"], mp.inputs["Vector"])
-        nt.links.new(mp.outputs["Vector"], tex.inputs["Vector"])
     return tex
 
 
@@ -208,7 +200,8 @@ def print_material(name, image_path, back_path=None):
     """Per-part printed-ink layer: textured, transparent where the art is clear.
 
     If back_path is given (double-sided), the front texture shows on the front face
-    and the back texture on the back face (chosen via geometry backfacing).
+    and the back texture on the back face (chosen via geometry backfacing). The back
+    naturally mirrors when viewed from behind, which is the expected standee look.
     """
     mat = bpy.data.materials.new(name=f"{name}_print")
     mat.use_nodes = True
@@ -218,7 +211,7 @@ def print_material(name, image_path, back_path=None):
 
     front = _image_node(nt, image_path)
     if back_path:
-        back = _image_node(nt, back_path, flip_u=True)
+        back = _image_node(nt, back_path)
         geo = nt.nodes.new("ShaderNodeNewGeometry")
         mix_c = nt.nodes.new("ShaderNodeMix"); mix_c.data_type = "RGBA"
         mix_a = nt.nodes.new("ShaderNodeMix"); mix_a.data_type = "FLOAT"
