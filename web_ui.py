@@ -1,4 +1,4 @@
-"""Minimal local web UI for the Acrylic-Standee-Maker pipeline.
+"""Minimal local web UI for the Pic2Acrylic pipeline.
 
 Drag part PNGs into the browser, pick a thickness, hit Build:
   -> saves the files, runs stage 1 (prep_masks), then launches Blender (stage 2)
@@ -77,7 +77,7 @@ PAGE = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Acrylic Standee Maker</title>
+<title>Pic2Acrylic</title>
 <style>
   :root{
     color-scheme:dark;
@@ -163,8 +163,8 @@ PAGE = """<!doctype html>
       </div>
       <!-- /STUDIO LOGO -->
       <div class="brand">
-        <h1>Acrylic Standee Maker</h1>
-        <p>Preview your layered art as printed transparent-acrylic pieces.</p>
+        <h1>Pic2Acrylic</h1>
+        <p>Turn layered art into printed transparent-acrylic standee pieces.</p>
       </div>
     </header>
 
@@ -327,5 +327,5 @@ def build():
 
 
 if __name__ == "__main__":
-    print("Acrylic Standee Maker UI -> http://127.0.0.1:5000")
+    print("Pic2Acrylic UI -> http://127.0.0.1:5000")
     app.run(host="127.0.0.1", port=5000, debug=False)
