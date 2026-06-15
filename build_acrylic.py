@@ -33,6 +33,8 @@ THICKNESS_CM = float(os.environ.get("ACRYLIC_THICKNESS_CM", 0.3))  # sheet thick
 HEIGHT_CM = float(os.environ.get("ACRYLIC_HEIGHT_CM", 15.0))       # real height of the TALLEST piece
 GAP_CM = float(os.environ.get("ACRYLIC_GAP_CM", 0.4))             # gap between sheets (depth)
 FLIP_V = os.environ.get("ACRYLIC_FLIP_V", "0").lower() in ("1", "true", "yes")
+# When on, use an auto-detected <part>_back.png for the back face of each piece.
+DOUBLE_SIDED = os.environ.get("ACRYLIC_DOUBLE_SIDED", "0").lower() in ("1", "true", "yes")
 # ---------------------------------------------------------------------------
 
 
@@ -185,23 +187,56 @@ def acrylic_material():
     return mat
 
 
-def print_material(name, image_path):
-    """Per-part printed-ink layer: textured, transparent where the art is clear."""
+def _image_node(nt, path, flip_u=False):
+    """An Image Texture node; flip_u mirrors horizontally (for back-side art so it
+    reads correctly when viewed from behind the sheet)."""
+    tex = nt.nodes.new("ShaderNodeTexImage")
+    tex.image = bpy.data.images.load(str(path), check_existing=True)
+    tex.interpolation = "Cubic"
+    if flip_u:
+        uv = nt.nodes.new("ShaderNodeTexCoord")
+        mp = nt.nodes.new("ShaderNodeMapping")
+        mp.inputs["Scale"].default_value = (-1.0, 1.0, 1.0)
+        mp.inputs["Location"].default_value = (1.0, 0.0, 0.0)
+        nt.links.new(uv.outputs["UV"], mp.inputs["Vector"])
+        nt.links.new(mp.outputs["Vector"], tex.inputs["Vector"])
+    return tex
+
+
+def print_material(name, image_path, back_path=None):
+    """Per-part printed-ink layer: textured, transparent where the art is clear.
+
+    If back_path is given (double-sided), the front texture shows on the front face
+    and the back texture on the back face (chosen via geometry backfacing).
+    """
     mat = bpy.data.materials.new(name=f"{name}_print")
     mat.use_nodes = True
     nt = mat.node_tree
     bsdf = nt.nodes.get("Principled BSDF")
-    tex = nt.nodes.new("ShaderNodeTexImage")
-    img = bpy.data.images.load(str(image_path), check_existing=True)
-    tex.image = img
-    tex.interpolation = "Cubic"
     set_principled(bsdf, "Roughness", 0.45)
-    nt.links.new(tex.outputs["Color"], bsdf.inputs["Base Color"])
-    nt.links.new(tex.outputs["Alpha"], bsdf.inputs["Alpha"])
+
+    front = _image_node(nt, image_path)
+    if back_path:
+        back = _image_node(nt, back_path, flip_u=True)
+        geo = nt.nodes.new("ShaderNodeNewGeometry")
+        mix_c = nt.nodes.new("ShaderNodeMix"); mix_c.data_type = "RGBA"
+        mix_a = nt.nodes.new("ShaderNodeMix"); mix_a.data_type = "FLOAT"
+        nt.links.new(geo.outputs["Backfacing"], mix_c.inputs[0])   # Factor
+        nt.links.new(front.outputs["Color"], mix_c.inputs[6])      # A (color)
+        nt.links.new(back.outputs["Color"], mix_c.inputs[7])       # B (color)
+        nt.links.new(geo.outputs["Backfacing"], mix_a.inputs[0])
+        nt.links.new(front.outputs["Alpha"], mix_a.inputs[2])      # A (float)
+        nt.links.new(back.outputs["Alpha"], mix_a.inputs[3])       # B (float)
+        color_out, alpha_out = mix_c.outputs[2], mix_a.outputs[0]
+    else:
+        color_out, alpha_out = front.outputs["Color"], front.outputs["Alpha"]
+
+    nt.links.new(color_out, bsdf.inputs["Base Color"])
+    nt.links.new(alpha_out, bsdf.inputs["Alpha"])
     # A little self-emission so the ink reads from BOTH sides (the back face is
     # otherwise unlit by the front sun and goes dark behind the clear acrylic).
     if "Emission Color" in bsdf.inputs:
-        nt.links.new(tex.outputs["Color"], bsdf.inputs["Emission Color"])
+        nt.links.new(color_out, bsdf.inputs["Emission Color"])
     if "Emission Strength" in bsdf.inputs:
         bsdf.inputs["Emission Strength"].default_value = 0.4
     # transparent where alpha==0 (EEVEE blend property differs across versions);
@@ -217,17 +252,16 @@ def print_material(name, image_path):
     return mat
 
 
-def resolve_texture(part, manifest_dir):
-    """Texture path: src_dir may be absolute or relative to the manifest."""
-    src_dir = part.get("src_dir", "")
-    cand = os.path.join(src_dir, part["texture"])
+def resolve_texture(fname, src_dir, manifest_dir):
+    """Resolve a texture filename: src_dir may be absolute or relative to manifest."""
+    cand = os.path.join(src_dir, fname)
     if os.path.isabs(cand) and os.path.exists(cand):
         return cand
-    rel = os.path.join(manifest_dir, src_dir, part["texture"])
+    rel = os.path.join(manifest_dir, src_dir, fname)
     if os.path.exists(rel):
         return rel
-    # last resort: texture sitting next to the manifest
-    return os.path.join(manifest_dir, part["texture"])
+    # last resort: sitting next to the manifest
+    return os.path.join(manifest_dir, fname)
 
 
 def apply_transform(objs, location=False, rotation=False, scale=False):
@@ -266,13 +300,20 @@ def build(manifest_path):
         assign_uv(base, frame)
 
         # Print layer: the flat cut-shape carrying the textured (alpha-masked) ink.
-        tex_path = resolve_texture(part, manifest_dir)
+        src_dir = part.get("src_dir", "")
+        tex_path = resolve_texture(part["texture"], src_dir, manifest_dir)
         if not os.path.exists(tex_path):
             print(f"  WARNING: texture not found for {name}: {tex_path}")
+        back_path = None
+        if DOUBLE_SIDED and part.get("texture_back"):
+            bp = resolve_texture(part["texture_back"], src_dir, manifest_dir)
+            if os.path.exists(bp):
+                back_path = bp
+                print(f"  {name}: using back-side art {part['texture_back']}")
         prt = base
         prt.name = f"{name}_print"
         prt.data.materials.clear()                       # drop the importer's SVGMat
-        prt.data.materials.append(print_material(name, tex_path))
+        prt.data.materials.append(print_material(name, tex_path, back_path))
 
         # Acrylic layer: a copy of the cut-shape, solidified, with the shared material.
         acr = prt.copy()

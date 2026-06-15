@@ -105,11 +105,11 @@ def write_check(out_path, img_rgba, contour):
 
 
 def discover_parts(parts_dir):
-    """Find <part>.png files (excluding _mask / _bleed siblings)."""
+    """Find <part>.png files (excluding _mask / _bleed / _back siblings)."""
     parts = []
     for png in sorted(parts_dir.glob("*.png")):
         stem = png.stem
-        if stem.endswith("_mask") or stem.endswith("_bleed"):
+        if stem.endswith("_mask") or stem.endswith("_bleed") or stem.endswith("_back"):
             continue
         parts.append(stem)
     return parts
@@ -143,6 +143,7 @@ def main(argv=None):
         main_png = parts_dir / f"{name}.png"
         mask_png = parts_dir / f"{name}_mask.png"
         bleed_png = parts_dir / f"{name}_bleed.png"
+        back_png = parts_dir / f"{name}_back.png"   # optional back-side artwork
 
         img_rgba = load_rgba(main_png)
         h, w = img_rgba.shape[:2]
@@ -169,15 +170,19 @@ def main(argv=None):
         write_check(out_dir / f"{name}_check.png", img_rgba, contour)
 
         texture = bleed_png.name if bleed_png.exists() else main_png.name
-        manifest["parts"].append({
+        entry = {
             "name": name,
             "svg": svg_name,
             "texture": texture,
             "src_dir": str(parts_dir),
             "width_px": w,
             "height_px": h,
-        })
-        print(f"  {name}: {len(contour)} pts (from {src}) -> {svg_name}")
+        }
+        if back_png.exists():                       # auto-detected back-side art
+            entry["texture_back"] = back_png.name
+        manifest["parts"].append(entry)
+        print(f"  {name}: {len(contour)} pts (from {src}) -> {svg_name}"
+              f"{' [+back]' if back_png.exists() else ''}")
 
     (out_dir / "manifest.json").write_text(
         json.dumps(manifest, indent=2), encoding="utf-8")

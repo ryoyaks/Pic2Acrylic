@@ -30,6 +30,9 @@ clear acrylic sheet (a single shared **"Acrylic"** material, so you can retune t
 look once for all pieces). Real size comes from the height you enter, not the image
 resolution — paint as large as you like.
 
+For art drawn on both sides, tick **Double-sided** and drop a `<part>_back.png` next to
+each part — it's auto-detected and printed (mirrored) on the back face.
+
 > Folder drag + writing the `.blend` back into your folder uses the browser's File
 > System Access API — use a Chromium browser (Edge/Chrome) and allow write access when
 > prompted. All parts must share the same canvas pixel size (keeps them aligned).

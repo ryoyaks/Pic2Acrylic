@@ -141,6 +141,9 @@ PAGE = """<!doctype html>
   .field label{font-size:13px; color:#c3cad8; white-space:nowrap; width:88px;}
   .diagram{flex:0 0 auto; width:148px;}
   .diagram svg{width:148px; height:auto; display:block;}
+  .toggle{display:flex; align-items:center; gap:8px; font-size:13px; color:#c3cad8; cursor:pointer;}
+  .toggle input{accent-color:var(--accent); width:15px; height:15px;}
+  .toggle .hint{color:var(--muted); font-size:12px;}
   input[type=range]{flex:1; accent-color:var(--accent); min-width:80px;}
   input[type=number]{width:68px; background:#0e1117; border:1px solid #333b48; color:var(--ink);
         border-radius:8px; padding:8px 8px; font-size:14px;}
@@ -225,6 +228,9 @@ PAGE = """<!doctype html>
             <input id="thickness" type="number" min="0.1" step="0.05" value="0.3">
             <span class="unit">cm</span>
           </div>
+          <label class="toggle" title="Some art is drawn on both sides. Auto-detects a &lt;part&gt;_back.png in your folder and prints it on the back face.">
+            <input id="double" type="checkbox"> Double-sided <span class="hint">&mdash; auto-detects &lt;part&gt;_back.png</span>
+          </label>
         </div>
 
         <div class="diagram" aria-hidden="true">
@@ -335,10 +341,12 @@ PAGE = """<!doctype html>
   function pts(arr){ return arr.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' '); }
   function updateDiagram(){
     const H=parseFloat(heightEl.value)||0, T=parseFloat(num.value)||0;
-    const x0=52, w=52, cy=86;                          // cy = vertical centre of the viewBox
-    const hpx=Math.min(120, Math.max(24, H*3.8));   // taller value -> taller sheet
-    const dpx=Math.min(30, Math.max(4, T*34));        // thicker value -> deeper side
+    const cx=70, cy=86;                                // centre of the viewBox
+    const hpx=Math.min(118, Math.max(24, H*3.6));    // taller value -> taller sheet
+    const w=hpx*0.42;                                  // portrait proportion (a standee is tall/slim)
+    const dpx=Math.min(26, Math.max(4, T*34));        // thicker value -> deeper side
     const dx=dpx*0.86, dy=dpx*0.5;
+    const x0=cx-(w+dx)/2;                               // centre horizontally (incl. depth)
     const baseY=cy + (hpx+dy)/2 - 4;                   // centre the whole drawing vertically
     const topY=baseY-hpx;
     setAttrs('d-front',{points:pts([[x0,topY],[x0+w,topY],[x0+w,baseY],[x0,baseY]])});
@@ -376,6 +384,7 @@ PAGE = """<!doctype html>
     const fd=new FormData();
     chosen.forEach(f=>fd.append('files',f,f.name));
     fd.append('thickness',num.value); fd.append('height',heightEl.value);
+    fd.append('double', document.getElementById('double').checked ? '1' : '0');
     try{
       const r=await fetch('/build',{method:'POST',body:fd});
       const reader=r.body.getReader(), dec=new TextDecoder(); let buf='', okMsg=null, failed=false;
@@ -429,13 +438,15 @@ def result_blend():
 
 def _is_part(fn):
     s = fn.lower()
-    return s.endswith(".png") and not (s.endswith("_mask.png") or s.endswith("_bleed.png"))
+    return s.endswith(".png") and not (s.endswith("_mask.png")
+                                       or s.endswith("_bleed.png") or s.endswith("_back.png"))
 
 
 @app.route("/build", methods=["POST"])
 def build():
     thickness = request.form.get("thickness", "0.3")
     height = request.form.get("height", "15")
+    double = "1" if request.form.get("double", "0") in ("1", "true", "on") else "0"
     try:
         float(thickness)
         float(height)
@@ -478,7 +489,8 @@ def build():
 
         blend = prep / "acrylic.blend"
         env = dict(os.environ, ACRYLIC_THICKNESS_CM=str(thickness),
-                   ACRYLIC_HEIGHT_CM=str(height), ACRYLIC_PACK="1")
+                   ACRYLIC_HEIGHT_CM=str(height), ACRYLIC_PACK="1",
+                   ACRYLIC_DOUBLE_SIDED=double)
         proc = subprocess.Popen(
             [blender, "--background", "--factory-startup", "--python",
              str(HERE / "build_acrylic.py"), "--", str(prep / "manifest.json"), str(blend)],
