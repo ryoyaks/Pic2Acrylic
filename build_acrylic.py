@@ -204,6 +204,16 @@ def resolve_texture(part, manifest_dir):
     return os.path.join(manifest_dir, part["texture"])
 
 
+def apply_transform(objs, location=False, rotation=False, scale=False):
+    """object.transform_apply on each object individually (headless-safe)."""
+    for obj in objs:
+        with bpy.context.temp_override(active_object=obj,
+                                       selected_objects=[obj],
+                                       selected_editable_objects=[obj]):
+            bpy.ops.object.transform_apply(location=location,
+                                           rotation=rotation, scale=scale)
+
+
 def build(manifest_path):
     manifest_path = os.path.abspath(manifest_path)
     manifest_dir = os.path.dirname(manifest_path)
@@ -241,40 +251,48 @@ def build(manifest_path):
         pieces.append(obj)
         print(f"  built {part['name']}")
 
-    # Parent everything to one Empty so we can scale/stand the whole set at once.
-    empty = bpy.data.objects.new("Standee", None)
-    bpy.context.collection.objects.link(empty)
-    for obj in pieces:
-        obj.parent = empty
+    # Every piece shares the SVG importer's origin, so applying the same scale and
+    # rotation to each one (no parent) keeps them mutually aligned -- and leaves the
+    # pieces independent so you can grab and rotate any one without dragging the rest.
 
-    # Scale so 1 BU == 1 mm: the canvas height maps to HEIGHT_MM.
+    # Scale so 1 BU == 1 mm (canvas height -> HEIGHT_MM). Baking scale to 1.0 is what
+    # makes Solidify's THICKNESS_MM read as real millimetres on the final-size mesh.
     frame_h = (frame[3] - frame[1]) or 1.0
-    empty.scale = (HEIGHT_MM / frame_h,) * 3
+    s = HEIGHT_MM / frame_h
+    for obj in pieces:
+        obj.scale = (s, s, s)
+    apply_transform(pieces, scale=True)
 
-    # Bake the scale into the meshes, then stand the group upright (+X tilt).
+    # Stand upright (+X tilt), about the shared origin so alignment is preserved.
+    for obj in pieces:
+        obj.rotation_euler = (math.pi / 2.0, 0.0, 0.0)
+    apply_transform(pieces, rotation=True)
+
+    # Drop the whole set onto the floor (min Z -> 0) and centre it in X, shifting
+    # every piece by the SAME amount so they stay registered to each other.
+    bpy.context.view_layer.update()
+    zs, xs = [], []
+    for obj in pieces:
+        for corner in obj.bound_box:
+            w = obj.matrix_world @ mathutils.Vector(corner)
+            zs.append(w.z)
+            xs.append(w.x)
+    dz, dx = -min(zs), -(min(xs) + max(xs)) / 2.0
+    for obj in pieces:
+        obj.location.x += dx
+        obj.location.z += dz
+
+    # Give each piece its own origin at its geometry centre, so it rotates about
+    # itself instead of some shared far-away point.
     bpy.context.view_layer.update()
     for obj in pieces:
         with bpy.context.temp_override(active_object=obj,
                                        selected_objects=[obj],
                                        selected_editable_objects=[obj]):
-            bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
-    empty.scale = (1.0, 1.0, 1.0)
-    empty.rotation_euler = (math.pi / 2.0, 0.0, 0.0)
-    bpy.context.view_layer.update()
-
-    # Drop the whole set onto the floor (min Z -> 0) and centre it in X.
-    zs, xs = [], []
-    for obj in pieces:
-        for corner in obj.bound_box:
-            wco = obj.matrix_world @ mathutils.Vector(corner)
-            zs.append(wco.z)
-            xs.append(wco.x)
-    empty.location.z -= min(zs)
-    empty.location.x -= (min(xs) + max(xs)) / 2.0
-    bpy.context.view_layer.update()
+            bpy.ops.object.origin_set(type="ORIGIN_GEOMETRY", center="MEDIAN")
 
     print(f"[done] {len(pieces)} piece(s)")
-    return empty
+    return pieces
 
 
 def main():
