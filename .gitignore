@@ -1,0 +1,13 @@
+# generated test/scratch artifacts
+parts/
+parts_prep/
+*_prep/
+.probe/
+
+# Blender output
+*.blend
+*.blend1
+
+# python
+__pycache__/
+*.pyc
