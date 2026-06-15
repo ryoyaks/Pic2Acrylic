@@ -229,7 +229,6 @@ PAGE = """<!doctype html>
 
         <div class="diagram" aria-hidden="true">
           <svg id="dim" viewBox="0 0 148 172" xmlns="http://www.w3.org/2000/svg">
-            <line x1="20" y1="156" x2="138" y2="156" stroke="#2a3040" stroke-width="1"/>
             <polygon id="d-top"   fill="#9d7bff" fill-opacity=".45" stroke="#cfd9ee" stroke-opacity=".5" stroke-width="1"/>
             <polygon id="d-side"  fill="#6ea8ff" fill-opacity=".5"  stroke="#cfd9ee" stroke-opacity=".5" stroke-width="1"/>
             <polygon id="d-front" fill="#6ea8ff" fill-opacity=".16" stroke="#cfd9ee" stroke-opacity=".75" stroke-width="1.2"/>
@@ -336,11 +335,12 @@ PAGE = """<!doctype html>
   function pts(arr){ return arr.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' '); }
   function updateDiagram(){
     const H=parseFloat(heightEl.value)||0, T=parseFloat(num.value)||0;
-    const baseY=156, x0=52, w=52;
+    const x0=52, w=52, cy=86;                          // cy = vertical centre of the viewBox
     const hpx=Math.min(120, Math.max(24, H*3.8));   // taller value -> taller sheet
-    const topY=baseY-hpx;
     const dpx=Math.min(30, Math.max(4, T*34));        // thicker value -> deeper side
     const dx=dpx*0.86, dy=dpx*0.5;
+    const baseY=cy + (hpx+dy)/2 - 4;                   // centre the whole drawing vertically
+    const topY=baseY-hpx;
     setAttrs('d-front',{points:pts([[x0,topY],[x0+w,topY],[x0+w,baseY],[x0,baseY]])});
     setAttrs('d-top',{points:pts([[x0,topY],[x0+w,topY],[x0+w+dx,topY-dy],[x0+dx,topY-dy]])});
     setAttrs('d-side',{points:pts([[x0+w,topY],[x0+w+dx,topY-dy],[x0+w+dx,baseY-dy],[x0+w,baseY]])});
