@@ -36,8 +36,18 @@ carries the shape.
 
 ## Usage
 
-One-click (Windows): **drag a parts folder onto `build-acrylic.bat`**. It runs stage 1,
-finds Blender, then runs stage 2, writing `<folder>_prep\acrylic.blend`.
+### Web UI (simplest)
+Run **`web-ui.bat`** (installs deps on first run, opens http://127.0.0.1:5000).
+Drag your part PNGs into the page, set the **thickness (mm)**, and click *Build* — it
+traces the masks and opens Blender with the standee assembled. Or start it manually:
+
+```bat
+python web_ui.py
+```
+
+### One-click batch (Windows)
+**Drag a parts folder onto `build-acrylic.bat`**. It runs stage 1, finds Blender, then
+runs stage 2, writing `<folder>_prep\acrylic.blend`.
 
 Or run the stages manually:
 
@@ -57,10 +67,14 @@ blender --background --python build_acrylic.py -- <out_dir>\manifest.json <out_d
 - `<part>_check.png` — artwork with the red cut-line drawn on top (eyeball the fit).
 - `manifest.json` — consumed by stage 2.
 
-### Stage 2 tunables (top of `build_acrylic.py`)
-- `THICKNESS_MM` (default 3.0) — acrylic sheet thickness.
+### Stage 2 tunables (top of `build_acrylic.py`, or env vars)
+- `THICKNESS_MM` (default 3.0) — acrylic sheet thickness. Env: `ACRYLIC_THICKNESS_MM`.
 - `HEIGHT_MM` (default 150.0) — final standee height; the canvas height maps to this.
+  Env: `ACRYLIC_HEIGHT_MM`.
 - `FLIP_V` (default False) — flip if the printed texture comes out upside-down.
+  Env: `ACRYLIC_FLIP_V=1`.
+
+The web UI passes thickness through `ACRYLIC_THICKNESS_MM`.
 
 ### Finding Blender from the .bat
 Search order: `BLENDER_PATH` env var -> `where blender` -> `Program Files\Blender

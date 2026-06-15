@@ -3,6 +3,7 @@ parts/
 parts_prep/
 *_prep/
 .probe/
+_web_work/
 
 # Blender output
 *.blend

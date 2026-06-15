@@ -27,10 +27,10 @@ import tempfile
 import bpy
 import mathutils
 
-# ---- tunables -------------------------------------------------------------
-THICKNESS_MM = 3.0      # acrylic sheet thickness
-HEIGHT_MM = 150.0       # final height of the whole standee (canvas height -> this)
-FLIP_V = False          # flip if the printed texture comes out upside-down
+# ---- tunables (env vars let the web UI / .bat override without editing) ----
+THICKNESS_MM = float(os.environ.get("ACRYLIC_THICKNESS_MM", 3.0))  # sheet thickness
+HEIGHT_MM = float(os.environ.get("ACRYLIC_HEIGHT_MM", 150.0))      # canvas height -> this
+FLIP_V = os.environ.get("ACRYLIC_FLIP_V", "0").lower() in ("1", "true", "yes")
 # ---------------------------------------------------------------------------
 
 
