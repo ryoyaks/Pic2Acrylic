@@ -135,9 +135,12 @@ PAGE = """<!doctype html>
   .tag{font-size:10px; padding:1px 7px; border-radius:999px; border:1px solid var(--line); color:var(--muted);}
   .tag.mask{color:var(--accent2); border-color:rgba(157,123,255,.4);}
 
-  .controls{display:flex; flex-direction:column; align-items:stretch; gap:14px; margin-top:20px;}
+  .controls{display:flex; flex-direction:row; align-items:center; gap:18px; margin-top:20px;}
+  .ctrl-fields{flex:1; min-width:0; display:flex; flex-direction:column; gap:14px;}
   .field{display:flex; align-items:center; gap:12px;}
-  .field label{font-size:13px; color:#c3cad8; white-space:nowrap; width:96px;}
+  .field label{font-size:13px; color:#c3cad8; white-space:nowrap; width:88px;}
+  .diagram{flex:0 0 auto; width:148px;}
+  .diagram svg{width:148px; height:auto; display:block;}
   input[type=range]{flex:1; accent-color:var(--accent); min-width:80px;}
   input[type=number]{width:68px; background:#0e1117; border:1px solid #333b48; color:var(--ink);
         border-radius:8px; padding:8px 8px; font-size:14px;}
@@ -208,24 +211,41 @@ PAGE = """<!doctype html>
       <ul id="files"></ul>
 
       <div class="controls">
-        <div class="field" title="Real-world height of the TALLEST piece; everything else scales to match.">
-          <label for="height">Max Height</label>
-          <input id="height" type="number" min="1" step="0.5" value="15">
-          <span class="unit">cm</span>
+        <div class="ctrl-fields">
+          <div class="field" title="Real-world height of the TALLEST piece; everything else scales to match.">
+            <label for="height">Max Height</label>
+            <input id="height" type="number" min="1" step="0.5" value="15">
+            <span class="unit">cm</span>
+          </div>
+          <div class="field thick">
+            <label for="thickness">Thickness</label>
+            <input id="trange" type="range" min="0.1" max="1" step="0.05" value="0.3">
+            <input id="thickness" type="number" min="0.1" step="0.05" value="0.3">
+            <span class="unit">cm</span>
+          </div>
+          <button id="build" disabled>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+              <path d="M3.3 7L12 12l8.7-5M12 22V12"/>
+            </svg>
+            Build &amp; open Blender
+          </button>
         </div>
-        <div class="field thick">
-          <label for="thickness">Thickness</label>
-          <input id="trange" type="range" min="0.1" max="1" step="0.05" value="0.3">
-          <input id="thickness" type="number" min="0.1" step="0.05" value="0.3">
-          <span class="unit">cm</span>
-        </div>
-        <button id="build" disabled>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
-            <path d="M3.3 7L12 12l8.7-5M12 22V12"/>
+
+        <div class="diagram" aria-hidden="true">
+          <svg id="dim" viewBox="0 0 148 172" xmlns="http://www.w3.org/2000/svg">
+            <line x1="20" y1="156" x2="138" y2="156" stroke="#2a3040" stroke-width="1"/>
+            <polygon id="d-top"   fill="#9d7bff" fill-opacity=".45" stroke="#cfd9ee" stroke-opacity=".5" stroke-width="1"/>
+            <polygon id="d-side"  fill="#6ea8ff" fill-opacity=".5"  stroke="#cfd9ee" stroke-opacity=".5" stroke-width="1"/>
+            <polygon id="d-front" fill="#6ea8ff" fill-opacity=".16" stroke="#cfd9ee" stroke-opacity=".75" stroke-width="1.2"/>
+            <line id="d-haxis" stroke="#6ea8ff" stroke-width="1.2"/>
+            <line id="d-htop"  stroke="#6ea8ff" stroke-width="1.2"/>
+            <line id="d-hbot"  stroke="#6ea8ff" stroke-width="1.2"/>
+            <text id="d-hlabel" fill="#cfd9ee" font-size="11" text-anchor="middle"></text>
+            <line id="d-taxis" stroke="#9d7bff" stroke-width="1.2"/>
+            <text id="d-tlabel" fill="#cfd9ee" font-size="10" text-anchor="middle"></text>
           </svg>
-          Build &amp; open Blender
-        </button>
+        </div>
       </div>
       <div id="prog" class="prog" hidden><span id="bar"></span></div>
       <div id="log" class="log"></div>
@@ -304,8 +324,36 @@ PAGE = """<!doctype html>
     dirHandle=null; addFiles(loose);
   });
 
-  range.oninput=()=>{ num.value=range.value; };
-  num.oninput=()=>{ const v=parseFloat(num.value); if(!isNaN(v)) range.value=Math.min(1,Math.max(0.1,v)); };
+  // live 3D-ish diagram so users see what Max Height / Thickness mean
+  const SVGNS='http://www.w3.org/2000/svg';
+  function setAttrs(id,a){ const el=document.getElementById(id); for(const k in a) el.setAttribute(k,a[k]); }
+  function pts(arr){ return arr.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' '); }
+  function updateDiagram(){
+    const H=parseFloat(heightEl.value)||0, T=parseFloat(num.value)||0;
+    const baseY=156, x0=52, w=52;
+    const hpx=Math.min(120, Math.max(24, H*3.8));   // taller value -> taller sheet
+    const topY=baseY-hpx;
+    const dpx=Math.min(30, Math.max(4, T*34));        // thicker value -> deeper side
+    const dx=dpx*0.86, dy=dpx*0.5;
+    setAttrs('d-front',{points:pts([[x0,topY],[x0+w,topY],[x0+w,baseY],[x0,baseY]])});
+    setAttrs('d-top',{points:pts([[x0,topY],[x0+w,topY],[x0+w+dx,topY-dy],[x0+dx,topY-dy]])});
+    setAttrs('d-side',{points:pts([[x0+w,topY],[x0+w+dx,topY-dy],[x0+w+dx,baseY-dy],[x0+w,baseY]])});
+    const ax=34;
+    setAttrs('d-haxis',{x1:ax,y1:baseY,x2:ax,y2:topY});
+    setAttrs('d-htop',{x1:ax-4,y1:topY,x2:ax+4,y2:topY});
+    setAttrs('d-hbot',{x1:ax-4,y1:baseY,x2:ax+4,y2:baseY});
+    const my=(topY+baseY)/2;
+    setAttrs('d-hlabel',{x:ax-7,y:my,transform:'rotate(-90 '+(ax-7)+' '+my+')'});
+    document.getElementById('d-hlabel').textContent=H+' cm';
+    setAttrs('d-taxis',{x1:x0+w,y1:baseY+8,x2:x0+w+dx,y2:baseY+8-dy});
+    setAttrs('d-tlabel',{x:x0+w+dx+11,y:baseY+8-dy+3});
+    document.getElementById('d-tlabel').textContent=T+' cm';
+  }
+
+  range.oninput=()=>{ num.value=range.value; updateDiagram(); };
+  num.oninput=()=>{ const v=parseFloat(num.value); if(!isNaN(v)) range.value=Math.min(1,Math.max(0.1,v)); updateDiagram(); };
+  heightEl.oninput=updateDiagram;
+  updateDiagram();
 
   async function writeBlendBack(){
     const buf=await (await fetch('/result.blend')).arrayBuffer();
