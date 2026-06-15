@@ -167,17 +167,19 @@ def acrylic_material():
     mat = bpy.data.materials.new(name="Acrylic")
     mat.use_nodes = True
     bsdf = mat.node_tree.nodes.get("Principled BSDF")
-    set_principled(bsdf, "Base Color", (1.0, 1.0, 1.0, 1.0))
-    set_principled(bsdf, "Roughness", 0.03)
+    set_principled(bsdf, "Base Color", (0.90, 0.94, 1.0, 1.0))   # faint cool tint
+    set_principled(bsdf, "Roughness", 0.06)
     set_principled(bsdf, "IOR", 1.49)
-    if "Transmission Weight" in bsdf.inputs:        # Blender 4.x / 5.x
-        bsdf.inputs["Transmission Weight"].default_value = 1.0
-    elif "Transmission" in bsdf.inputs:             # older
-        bsdf.inputs["Transmission"].default_value = 1.0
-    # make transmission show up in EEVEE (attr names vary by version)
-    for attr in ("use_screen_refraction", "use_raytrace_refraction"):
+    # Alpha-blended translucency (not raytraced glass): this is see-through in every
+    # shading mode AND lets the print behind it show -- EEVEE's raytraced transmission
+    # would hide the alpha-blended print. Tweak this one shared material to taste.
+    set_principled(bsdf, "Alpha", 0.16)
+    for attr, val in (("blend_method", "BLEND"),
+                      ("surface_render_method", "BLENDED"),
+                      ("show_transparent_back", True),
+                      ("use_backface_culling", False)):
         try:
-            setattr(mat, attr, True)
+            setattr(mat, attr, val)
         except Exception:
             pass
     return mat
@@ -196,10 +198,18 @@ def print_material(name, image_path):
     set_principled(bsdf, "Roughness", 0.45)
     nt.links.new(tex.outputs["Color"], bsdf.inputs["Base Color"])
     nt.links.new(tex.outputs["Alpha"], bsdf.inputs["Alpha"])
-    # transparent where alpha==0 (EEVEE blend property differs across versions)
+    # A little self-emission so the ink reads from BOTH sides (the back face is
+    # otherwise unlit by the front sun and goes dark behind the clear acrylic).
+    if "Emission Color" in bsdf.inputs:
+        nt.links.new(tex.outputs["Color"], bsdf.inputs["Emission Color"])
+    if "Emission Strength" in bsdf.inputs:
+        bsdf.inputs["Emission Strength"].default_value = 0.4
+    # transparent where alpha==0 (EEVEE blend property differs across versions);
+    # show_transparent_back True so the art is also visible from behind the sheet.
     for attr, val in (("blend_method", "BLEND"),
                       ("surface_render_method", "BLENDED"),
-                      ("show_transparent_back", False)):
+                      ("show_transparent_back", True),
+                      ("use_backface_culling", False)):
         try:
             setattr(mat, attr, val)
         except Exception:
@@ -345,9 +355,48 @@ def build(manifest_path):
             except Exception:
                 pass
 
-    # Make the clear acrylic actually read as transparent in EEVEE.
+    # A sun lamp lighting the standee from the front-above.
+    sun_data = bpy.data.lights.new("Sun", "SUN")
+    sun_data.energy = 3.0
+    sun = bpy.data.objects.new("Sun", sun_data)
+    scene_coll.objects.link(sun)
+    sun.rotation_euler = (math.radians(62), 0.0, math.radians(18))
+
+    # Ambient world light so the print is also visible from the BACK (the sun only
+    # lights the front face; without fill the reverse side reads as black).
+    world = bpy.context.scene.world or bpy.data.worlds.new("World")
+    bpy.context.scene.world = world
+    world.use_nodes = True
+    bg = world.node_tree.nodes.get("Background")
+    if bg:
+        bg.inputs[0].default_value = (0.38, 0.38, 0.42, 1.0)
+        bg.inputs[1].default_value = 0.7
+
+    # Make the clear acrylic actually read as transparent (needs EEVEE raytracing),
+    # and open the viewport in Rendered shading so you can see THROUGH the acrylic
+    # to the pieces behind (and the art from the back). Transmission/alpha don't
+    # show in Solid / Material-preview shading.
     try:
         bpy.context.scene.eevee.use_raytracing = True
+    except Exception:
+        pass
+
+    # Switch the 3D viewport to Rendered once the GUI exists (a timer, because at
+    # script time during startup the window/areas aren't ready; in --background
+    # there are no windows so this is a harmless no-op).
+    def _to_rendered():
+        for win in getattr(bpy.context.window_manager, "windows", []):
+            scr = win.screen
+            if not scr:
+                continue
+            for area in scr.areas:
+                if area.type == "VIEW_3D":
+                    for sp in area.spaces:
+                        if sp.type == "VIEW_3D":
+                            sp.shading.type = "RENDERED"
+        return None
+    try:
+        bpy.app.timers.register(_to_rendered, first_interval=0.4)
     except Exception:
         pass
 

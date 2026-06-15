@@ -75,7 +75,7 @@ echo Using Blender: %BLENDER%
 REM --- stage 2: build acrylic .blend ----------------------------------------
 echo.
 echo === Stage 2: build_acrylic ===
-"%BLENDER%" --python "%HERE%build_acrylic.py" -- "%PREP%\manifest.json" "%PREP%\acrylic.blend"
+"%BLENDER%" --python "%HERE%build_acrylic.py" --python "%HERE%gui_view.py" -- "%PREP%\manifest.json" "%PREP%\acrylic.blend"
 if errorlevel 1 (
   echo ERROR: build_acrylic failed.
   pause

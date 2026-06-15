@@ -496,7 +496,7 @@ def build():
             yield f"ERR|Stage 2 (Blender) failed. See the server console.\n"
             return
 
-        subprocess.Popen([blender, str(blend)])
+        subprocess.Popen([blender, str(blend), "--python", str(HERE / "gui_view.py")])
         yield p(95, "Opening in Blender...")
         yield (f"OK|Built {nparts} piece(s): {height} cm tall, {thickness} cm thick. "
                f"Opened in Blender.\n")

@@ -26,7 +26,8 @@ from PIL import Image
 ALPHA_THRESHOLD_DEFAULT = 10
 # approxPolyDP tolerance in PIXELS (absolute, so it doesn't scale up on big canvases
 # and flatten curves). Small = smoother curves; 0 = keep the raw contour.
-SIMPLIFY_PX_DEFAULT = 1.5
+# Default tuned for maximum smoothness (just enough to clean pixel-staircase noise).
+SIMPLIFY_PX_DEFAULT = 1.0
 
 
 def load_rgba(path):
