@@ -239,11 +239,14 @@ def print_material(name, image_path, back_path=None):
         nt.links.new(color_out, bsdf.inputs["Emission Color"])
     if "Emission Strength" in bsdf.inputs:
         bsdf.inputs["Emission Strength"].default_value = 0.4
-    # transparent where alpha==0 (EEVEE blend property differs across versions);
-    # show_transparent_back True so the art is also visible from behind the sheet.
-    for attr, val in (("blend_method", "BLEND"),
-                      ("surface_render_method", "BLENDED"),
-                      ("show_transparent_back", True),
+    # The INK must be opaque (only the clear acrylic is see-through). Use alpha
+    # clip / dithered, not blend: it writes depth and is order-independent, so the
+    # print isn't see-through where there's ink, yet is cut out where the art is
+    # clear. (Blend mode made the ink look translucent against the acrylic.)
+    for attr, val in (("blend_method", "CLIP"),
+                      ("alpha_threshold", 0.5),
+                      ("surface_render_method", "DITHERED"),
+                      ("show_transparent_back", False),
                       ("use_backface_culling", False)):
         try:
             setattr(mat, attr, val)
