@@ -1,6 +1,6 @@
 @echo off
 setlocal
-REM Launch the local acrylic-standee web UI.
+REM Launch the local Acrylic-Standee-Maker web UI.
 set "HERE=%~dp0"
 
 set "PY="

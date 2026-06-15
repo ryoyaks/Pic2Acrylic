@@ -1,4 +1,4 @@
-"""Minimal local web UI for the acrylic-standee pipeline.
+"""Minimal local web UI for the Acrylic-Standee-Maker pipeline.
 
 Drag part PNGs into the browser, pick a thickness, hit Build:
   -> saves the files, runs stage 1 (prep_masks), then launches Blender (stage 2)

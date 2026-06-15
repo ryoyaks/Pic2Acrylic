@@ -1,4 +1,4 @@
-# acrylic-standee
+# Acrylic-Standee-Maker
 
 Preview layered artwork as **printed transparent-acrylic standee pieces** in Blender,
 *before* sending anything to an acrylic print shop. It only does **conversion +
